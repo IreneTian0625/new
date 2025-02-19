@@ -1,0 +1,50 @@
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Electricity Consumption Visualization</title>
+</head>
+<body>
+    <h2>Electricity Consumption Visualization</h2>
+
+    <form method="post">
+        <label for="user_id">User ID:</label>
+        <input type="text" id="user_id" name="user_id" required>
+        <br>
+        <label for="meter_id">Meter ID:</label>
+        <input type="text" id="meter_id" name="meter_id" required>
+        <br>
+        <button type="submit">Generate Visualization</button>
+    </form>
+
+    {% if message %}
+    <p style="color: red;">{{ message }}</p>
+    {% endif %}
+
+    {% if line_chart %}
+    <h3>Daily Electricity Consumption Trend</h3>
+    <img src="data:image/png;base64,{{ line_chart }}" alt="Electricity Consumption Trend">
+    {% endif %}
+
+  
+
+    {% if daily_consumption %}
+    <h3>Daily Consumption Data</h3>
+    <table border="1">
+        <tr>
+            <th>Date</th>
+            <th>01:00 Reading (kWh)</th>
+            <th>23:30 Reading (kWh)</th>
+            <th>Total Usage (kWh)</th>
+        </tr>
+        {% for entry in daily_consumption %}
+        <tr>
+            <td>{{ entry.date }}</td>
+            <td>{{ entry.reading_0100 }}</td>
+            <td>{{ entry.reading_2330 }}</td>
+            <td>{{ entry.total_usage }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% endif %}
+</body>
+</html>

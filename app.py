@@ -1,26 +1,113 @@
 from flask import Flask, render_template, request, session, redirect, url_for
 import random
 import datetime
+import threading
 import json
 import os
+import matplotlib.pyplot as plt
+import pandas as pd
+import io
+import base64
 
 app = Flask(__name__)
 app.secret_key = "your_secret_key"
 user_data = {}
+users_completed = set()
+acceptAPI = True  # 服务器开关，默认开启
 
 def log_action(action, user_id, message):
-    # 获取当前时间
     current_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
-    # 日志内容
-    log_entry = f"[{current_time}] [{action}] User ID: {user_id} - {message}\n"
+    # 获取 meter_id
+    meter_id = user_data.get(user_id, {}).get('meter_id', 'Unknown')
+    
+    # 根据 action 类型生成日志条目
+    if action == "REGISTER":
+        # 获取用户注册时的详细信息
+        username = user_data.get(user_id, {}).get('username', 'Unknown')
+        dwelling_type = user_data.get(user_id, {}).get('dwelling_type', 'Unknown')
+        region = user_data.get(user_id, {}).get('region', 'Unknown')
+        area = user_data.get(user_id, {}).get('area', 'Unknown')
+        
+        # 生成注册日志条目
+        log_entry = (
+            f"[{current_time}] [{action}] User ID: {user_id}, Meter ID: {meter_id}, "
+            f"Username: {username}, Dwelling Type: {dwelling_type}, "
+            f"Region: {region}, Area: {area} - {message}\n"
+        )
+    else:
+        log_entry = f"[{current_time}] [{action}] User ID: {user_id}, Meter ID: {meter_id} - {message}\n"
     
     # 将日志写入本地文件
     with open("app_log.txt", "a") as log_file:
         log_file.write(log_entry)
-    
-    # 同时在控制台打印日志（可选）
-    print(log_entry.strip())
+
+
+def save_user_data(user_id, data, existing_data, lock):
+    """
+    将单个用户的数据保存到 existing_data 中。
+    :param user_id: 用户 ID
+    :param data: 用户数据
+    :param existing_data: 现有的 JSON 数据
+    :param lock: 线程锁，用于确保线程安全
+    """
+    with lock:
+        if user_id in existing_data:
+            # 如果用户已存在，追加新的读数
+            existing_data[user_id]['meter_readings'].extend(data['meter_readings'])
+        else:
+            # 如果用户不存在，创建新的条目
+            existing_data[user_id] = {
+                "user_info": {
+                    "user_id": user_id,
+                    "username": data['username'],
+                    "meter_id": data['meter_id'],
+                    "dwelling_type": data['dwelling_type'],
+                    "region": data['region'],
+                    "area": data['area'],
+                },
+                "meter_readings": data['meter_readings']
+            }
+
+def batch_job():
+    """
+    批处理任务，使用多线程处理每个用户的数据。
+    """
+    # 加载现有的 JSON 数据（如果文件存在）
+    if os.path.exists('electricity_record.json'):
+        with open('electricity_record.json', 'r') as file:
+            existing_data = json.load(file)
+    else:
+        existing_data = {}
+
+    # 创建线程锁，确保线程安全
+    lock = threading.Lock()
+
+    # 创建线程列表
+    threads = []
+
+    # 遍历所有用户，为每个用户创建一个线程
+    for user_id, data in user_data.items():
+        # 创建线程，目标函数是 save_user_data
+        t = threading.Thread(target=save_user_data, args=(user_id, data, existing_data, lock))
+        threads.append(t)
+        t.start()
+
+    # 等待所有线程完成
+    for t in threads:
+        t.join()
+
+    # 将更新后的数据写入 JSON 文件
+    with open('electricity_record.json', 'w') as file:
+        json.dump(existing_data, file, indent=4)
+
+    # 清空当天的读数数据
+    for user_id in user_data:
+        user_data[user_id]['meter_readings'] = []
+
+    # 清空日志文件
+    with open("app_log.txt", "w") as log_file:
+        log_file.write("")
 
 @app.route('/')
 def main_page():
@@ -52,11 +139,11 @@ def register_result():
         "dwelling_type": dwelling_type,
         "region": region,
         "area": area,
-        "register_account_time": start_time_str,
         "meter_readings": [],
         "next_meter_update_time": start_time_str
     }
 
+    # 记录注册日志
     log_action("REGISTER", unique_user_id, f"Registered user {username} with meter {meter_id}")
 
     return render_template(
@@ -110,27 +197,31 @@ def submit_reading():
     reading = float(request.form.get('reading'))
 
     if not user_data[user_id]['meter_readings']:
-        # 如果是第一次上传，使用用户选择的日期的 01:00:00
         current_time = f"{date} 01:00:00"
     else:
-        # 否则，基于上一次读数的时间增加 30 分钟
         last_reading_time = user_data[user_id]['meter_readings'][-1]['meter_update_time']
         current_time = (datetime.datetime.strptime(last_reading_time, '%Y-%m-%d %H:%M:%S') +
                        datetime.timedelta(minutes=30)).strftime('%Y-%m-%d %H:%M:%S')
+
+    if current_time > f"{date} 23:30:00":
+        return render_template(
+            'upload_reading.html',
+            user_id=user_id,
+            meter_id=meter_id,
+            date=date,
+            latest_reading=user_data[user_id]['meter_readings'][-1] if user_data[user_id]['meter_readings'] else None,
+            message="System maintenance in progress. Data upload is not allowed at this time."
+        )
 
     user_data[user_id]['meter_readings'].append({
         "meter_update_time": current_time,
         "reading": reading
     })
 
-    # 更新下一次读数时间
     user_data[user_id]['next_meter_update_time'] = current_time
 
+    # 记录上传读数日志
     log_action("UPLOAD_READING", user_id, f"Uploaded reading {reading} at {current_time}")
-
-    # 检查是否是最后一次读数（23:30:00）
-    if current_time.endswith("23:30:00"):
-        return redirect(url_for('stop_server'))
 
     latest_reading = user_data[user_id]['meter_readings'][-1] if user_data[user_id]['meter_readings'] else None
 
@@ -139,69 +230,17 @@ def submit_reading():
         user_id=user_id,
         meter_id=meter_id,
         date=date,
-        latest_reading=latest_reading
+        latest_reading=latest_reading,
+        message=""
     )
 
 @app.route('/stop_server', methods=['GET'])
 def stop_server():
-    user_id = session.get('user_id')
-    meter_id = session.get('meter_id')
-    date = session.get('date')
-
-    if not user_id or not meter_id or not date:
-        return "Session expired or invalid request", 400
-    
-    if os.path.exists('electricity_record.json'):
-        with open('electricity_record.json', 'r') as file:
-            existing_data = json.load(file)
-    else:
-        existing_data = {}
-
-    # 更新或添加当前用户的数据
-    if user_id in existing_data:
-        # 如果 user_id 已存在，追加新的读数
-        existing_data[user_id]['meter_readings'].extend(user_data[user_id]['meter_readings'])
-    else:
-        # 如果 user_id 不存在，创建新的条目
-        existing_data[user_id] = {
-            "user_info": {
-                "user_id": user_id,  # 添加 user_id
-                "username": user_data[user_id]['username'],
-                "meter_id": user_data[user_id]['meter_id'],
-                "dwelling_type": user_data[user_id]['dwelling_type'],
-                "region": user_data[user_id]['region'],
-                "area": user_data[user_id]['area'],
-                "register_account_time": user_data[user_id]['register_account_time']
-            },
-            "meter_readings": user_data[user_id]['meter_readings']
-        }
-
-    # 写入更新后的数据到 JSON 文件
-    with open('electricity_record.json', 'w') as file:
-        json.dump(existing_data, file, indent=4)
-
-    # 清空当前日期的数据
-    user_data[user_id]['meter_readings'] = []
-
-    # 更新日期为下一天的 01:00:00
-    next_date = (datetime.datetime.strptime(date, '%Y-%m-%d') + datetime.timedelta(days=1)).strftime('%Y-%m-%d')
-    user_data[user_id]['next_meter_update_time'] = f"{next_date} 01:00:00"
-
+    global acceptAPI
+    acceptAPI = False  # 关闭服务器，拒绝新的 API 请求
+    batch_job()  # 执行批处理作业
+    acceptAPI = True  # 恢复服务器
     return render_template('stop_server.html')
-
-@app.route('/next_day', methods=['GET'])
-def next_day():
-    user_id = session.get('user_id')
-    meter_id = session.get('meter_id')
-
-    if not user_id or not meter_id:
-        return "Session expired or invalid request", 400
-
-    next_date = (datetime.datetime.strptime(user_data[user_id]['next_meter_update_time'], '%Y-%m-%d %H:%M:%S') +
-                datetime.timedelta(days=1)).strftime('%Y-%m-%d')
-    user_data[user_id]['next_meter_update_time'] = f"{next_date} 01:00:00"
-
-    return redirect(url_for('upload_reading'))
 
 @app.route('/daily_query', methods=['GET', 'POST'])
 def daily_query():
@@ -215,15 +254,12 @@ def daily_query():
         if user_id not in user_data or user_data[user_id]['meter_id'] != meter_id:
             return render_template('daily_query.html', message="Invalid User ID or Meter ID")
 
-        # 获取 meter_readings 中的日期
         if user_data[user_id]['meter_readings']:
-            # 从第一条读数中提取日期
             first_reading_time = user_data[user_id]['meter_readings'][0]['meter_update_time']
-            date = first_reading_time.split(' ')[0]  # 提取日期部分（YYYY-MM-DD）
+            date = first_reading_time.split(' ')[0]
         else:
             return render_template('daily_query.html', message="No readings available for the selected user and meter")
 
-        # 过滤出当天的读数数据
         daily_readings = [
             reading for reading in user_data[user_id]['meter_readings']
             if reading['meter_update_time'].startswith(date)
@@ -240,7 +276,6 @@ def daily_query():
     return render_template('daily_query.html', message="")
 
 def load_json_data():
-    """加载 JSON 文件中的数据"""
     try:
         with open('electricity_record.json', 'r') as file:
             return json.load(file)
@@ -259,15 +294,12 @@ def history_query():
 
         json_data = load_json_data()
 
-        # 检查用户是否存在
         if user_id not in json_data:
             return render_template('history_query.html', message="Invalid User ID")
 
-        # 检查 meter_id 是否匹配
         if json_data[user_id]['user_info']['meter_id'] != meter_id:
             return render_template('history_query.html', message="Invalid Meter ID")
 
-        # 过滤出查询日期的读数数据
         daily_readings = [
             reading for reading in json_data[user_id]['meter_readings']
             if reading['meter_update_time'].startswith(query_date)
@@ -276,7 +308,6 @@ def history_query():
         if not daily_readings:
             return render_template('history_query.html', message=f"No data available for the date: {query_date}")
 
-        # 获取 01:00:00 和 23:30:00 的读数
         reading_0100 = next(
             (reading['reading'] for reading in daily_readings if reading['meter_update_time'].endswith('01:00:00')),
             None
@@ -308,5 +339,55 @@ def history_query():
 
     return render_template('history_query.html', message="")
 
+@app.route('/visualization', methods=['GET', 'POST'])
+def visualization():
+    if request.method == 'POST':
+        user_id = request.form.get('user_id')
+        meter_id = request.form.get('meter_id')
+
+        if not user_id or not meter_id:
+            return render_template('visualization.html', message="User ID and Meter ID are required!")
+
+        json_data = load_json_data()
+
+        if user_id not in json_data or json_data[user_id]['user_info']['meter_id'] != meter_id:
+            return render_template('visualization.html', message="Invalid User ID or Meter ID")
+
+        meter_readings = json_data[user_id]['meter_readings']
+
+        df = pd.DataFrame(meter_readings)
+        df['meter_update_time'] = pd.to_datetime(df['meter_update_time'])
+        df['date'] = df['meter_update_time'].dt.date
+
+        daily_consumption = df.groupby('date').agg(
+        reading_0100=pd.NamedAgg(column='reading', aggfunc=lambda x: x.iloc[0] if len(x) > 0 else None),
+        reading_2330=pd.NamedAgg(column='reading', aggfunc=lambda x: x.iloc[-1] if len(x) > 0 else None)
+        )
+        daily_consumption['total_usage'] = daily_consumption['reading_2330'] - daily_consumption['reading_0100']
+
+        daily_consumption.index = daily_consumption.index.astype(str)
+
+        plt.figure(figsize=(8, 4))
+        plt.plot(daily_consumption.index, daily_consumption['total_usage'], marker='o', linestyle='-', label="Total Consumption")
+        plt.xlabel("Date")
+        plt.ylabel("Electricity Consumption (kWh)")
+        plt.title("Daily Electricity Consumption Trend")
+        plt.legend()
+        plt.grid(True)
+
+        line_chart = io.BytesIO()
+        plt.savefig(line_chart, format='png')
+        line_chart.seek(0)
+        line_chart_base64 = base64.b64encode(line_chart.getvalue()).decode()
+
+        return render_template('visualization.html',
+                               user_id=user_id,
+                               meter_id=meter_id,
+                               daily_consumption=daily_consumption.to_dict(orient='records'),
+                               line_chart=line_chart_base64,
+                               message="")
+
+    return render_template('visualization.html', message="")
+
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, threaded=True)

@@ -1,5 +1,3 @@
-<!DOCTYPE html>
-<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,11 +6,15 @@
 </head>
 <body>
     <div class="container">
-        <h1>Data Upload Complete</h1>
-        <p>All readings for the day have been saved to the JSON file.</p>
-        <a href="/next_day">
-            <button>Next Day</button>
-        </a>
+        <h2>Stop Server</h2>
+
+        <div class="message">
+            <p>Batch job completed and server is restored.</p>
+        </div>
+
+        <form action="/" method="get">
+            <input type="submit" value="Back to Main Page">
+        </form>
     </div>
 </body>
 </html>

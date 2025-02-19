@@ -6,26 +6,44 @@
 </head>
 <body>
     <div class="container">
-        <h1>Upload Meter Reading</h1>
-        <form action="/submit_reading" method="POST">
-            <label for="reading">Meter Reading:</label>
-            <input type="number" id="reading" name="reading" step="0.01" required>
+        <h2>Upload Meter Reading</h2>
 
-            <input type="hidden" id="user_id" name="user_id" value="{{ user_id }}">
-            <input type="hidden" id="meter_id" name="meter_id" value="{{ meter_id }}">
-            <input type="hidden" id="date" name="date" value="{{ date }}">
+        <!-- 提示信息 -->
+        <div class="message">
+            {% if message %}
+                <p style="color: red;">{{ message }}</p>
+            {% endif %}
+        </div>
 
-            <button type="submit">Upload Reading</button>
+        <!-- 上传读数表单 -->
+        <form action="{{ url_for('submit_reading') }}" method="post">
+            <label for="reading">Reading:</label>
+            <input type="number" step="0.01" id="reading" name="reading" required>
+            <input type="hidden" name="user_id" value="{{ user_id }}">
+            <input type="hidden" name="meter_id" value="{{ meter_id }}">
+            <input type="hidden" name="date" value="{{ date }}">
+            <input type="submit" value="Submit Reading">
         </form>
 
-        {% if latest_reading %}
-            <h2>Previous Reading</h2>
-            <p>Time: {{ latest_reading.meter_update_time }}, Reading: {{ latest_reading.reading }}</p>
-        {% endif %}
+        <!-- 最新读数 -->
+        <div class="latest-reading">
+            <h3>Latest Reading</h3>
+            {% if latest_reading %}
+                <p><strong>Time:</strong> {{ latest_reading.meter_update_time }}</p>
+                <p><strong>Reading:</strong> {{ latest_reading.reading }}</p>
+            {% else %}
+                <p>No readings available.</p>
+            {% endif %}
+        </div>
+
+        <form action="/stop_server" method="get">
+            <input type="submit" value="Stop Server">
+        </form>
 
         <form action="/" method="get">
-            <input type="submit" value="Back to Main">
+            <input type="submit" value="Back to Main Page">
         </form>
+
     </div>
 </body>
 </html>
