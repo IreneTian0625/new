@@ -1,3 +1,5 @@
+<!DOCTYPE html>
+<html lang="en">
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
@@ -7,6 +9,7 @@
     <div class="container">
         <h2>Electricity Consumption Visualization</h2>
 
+        <!-- Form to input User ID and Meter ID -->
         <form method="post">
             <div class="form-group">
                 <label for="user_id">User ID:</label>
@@ -21,31 +24,34 @@
             <button type="submit" class="btn">Generate Visualization</button>
         </form>
 
+        <!-- Display error message if any -->
         {% if message %}
             <p class="error-message">{{ message }}</p>
         {% endif %}
 
+        <!-- Display the line chart if available -->
         {% if line_chart %}
-            <h3>Daily Electricity Consumption Trend</h3>
-            <!-- 为图片添加 class="image-class" -->
+            <h2>Daily Electricity Consumption Trend</h2>
+            <h3>User ID: {{ user_id }}, Meter ID: {{ meter_id }}</h3>
             <img src="data:image/png;base64,{{ line_chart }}" alt="Electricity Consumption Trend" class="image-class">
         {% endif %}
 
+        <!-- Display the daily consumption data in a table -->
         {% if daily_consumption %}
             <h3>Daily Consumption Data</h3>
             <table class="result-table">
                 <thead>
                     <tr>
                         <th>Date</th>
-                        <th>01:00 Reading (kWh)</th>
-                        <th>23:30 Reading (kWh)</th>
+                        <th>01:00 Reading</th>
+                        <th>23:30 Reading</th>
                         <th>Total Usage (kWh)</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for entry in daily_consumption %}
                     <tr>
-                        <td>{{ entry.date }}</td>
+                        <td>{{ entry.date }}</td> 
                         <td>{{ entry.reading_0100 }}</td>
                         <td>{{ entry.reading_2330 }}</td>
                         <td>{{ entry.total_usage }}</td>
@@ -55,9 +61,10 @@
             </table>
         {% endif %}
 
-        <!-- Back to Main Button -->
-        <br>
-        <a href="/" class="btn">Back to Main</a>
+        <!-- Button to go back to the main page -->
+        <form action="/" method="get">
+            <input type="submit" value="Back to Main Page">
+        </form>
     </div>
 </body>
 </html>
